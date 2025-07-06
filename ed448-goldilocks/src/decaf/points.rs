@@ -1,4 +1,5 @@
-use crate::constants::{BASEPOINT_ORDER, DECAF_BASEPOINT};
+use super::Scalar;
+use crate::constants::{DECAF_BASEPOINT, DECAF_BASEPOINT_ORDER};
 use crate::curve::twedwards::extended::ExtendedPoint;
 use crate::field::FieldElement;
 use crate::*;
@@ -227,7 +228,7 @@ impl CofactorGroup for DecafPoint {
     }
 
     fn is_torsion_free(&self) -> Choice {
-        (self * BASEPOINT_ORDER).ct_eq(&Self::IDENTITY)
+        (self * DECAF_BASEPOINT_ORDER).ct_eq(&Self::IDENTITY)
     }
 }
 

@@ -3,7 +3,7 @@ use core::fmt::{Display, Formatter, LowerHex, Result as FmtResult, UpperHex};
 use core::iter::Sum;
 use core::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 
-use crate::constants::BASEPOINT_ORDER;
+use crate::constants::ED_BASEPOINT_ORDER;
 use crate::curve::edwards::affine::AffinePoint;
 use crate::curve::montgomery::MontgomeryPoint; // XXX: need to fix this path
 use crate::curve::scalar_mul::variable_base;
@@ -727,7 +727,7 @@ impl EdwardsPoint {
     /// * `false` if `self` has a nonzero torsion component and is not
     ///   in the prime-order subgroup.
     pub fn is_torsion_free(&self) -> Choice {
-        (self * BASEPOINT_ORDER).ct_eq(&Self::IDENTITY)
+        (self * ED_BASEPOINT_ORDER).ct_eq(&Self::IDENTITY)
     }
 
     /// Hash a message to a point on the curve

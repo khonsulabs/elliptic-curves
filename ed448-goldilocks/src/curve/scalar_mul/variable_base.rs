@@ -51,7 +51,7 @@ mod test {
 
         let got = variable_base(&twisted_point, &scalar);
 
-        let got2 = double_and_add(&twisted_point, &scalar);
+        let got2 = double_and_add(&twisted_point, scalar.bits());
         assert_eq!(got, got2);
 
         // Lets see if this is conserved over the isogenies

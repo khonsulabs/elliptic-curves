@@ -4,6 +4,8 @@
 pub mod affine;
 mod ops;
 pub mod points;
+pub mod scalar;
 
 pub use affine::AffinePoint;
 pub use points::{CompressedDecaf, DecafPoint};
+pub use scalar::Scalar;

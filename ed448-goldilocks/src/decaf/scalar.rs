@@ -1,3 +1,4 @@
+use crate::field::{HALF_ORDER, NZ_ORDER, ORDER_MINUS_ONE, WIDE_ORDER_MINUS_ONE};
 use crate::*;
 
 use core::fmt::{Display, Formatter, Result as FmtResult};
@@ -28,37 +29,15 @@ use elliptic_curve::ff::{FieldBits, PrimeFieldBits};
 pub struct Scalar(pub(crate) U448);
 
 /// The number of bytes needed to represent the scalar field
-pub type ScalarBytes = Array<u8, U57>;
+pub type ScalarBytes = Array<u8, U56>;
 /// The number of bytes needed to represent the safely create a scalar from a random bytes
 pub type WideScalarBytes = Array<u8, U114>;
 
-/// The order of the scalar field
-pub const ORDER: U448 = U448::from_be_hex(
-    "3fffffffffffffffffffffffffffffffffffffffffffffffffffffff7cca23e9c44edb49aed63690216cc2728dc58f552378c292ab5844f3",
-);
-pub const NZ_ORDER: NonZero<U448> = NonZero::<U448>::new_unwrap(ORDER);
-pub(crate) const ORDER_MINUS_ONE: U448 = ORDER.wrapping_sub(&U448::ONE);
-pub(crate) const HALF_ORDER: U448 = ORDER.shr_vartime(1);
-/// The wide order of the scalar field
-pub const WIDE_ORDER: U896 = U896::from_be_hex(
-    "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003fffffffffffffffffffffffffffffffffffffffffffffffffffffff7cca23e9c44edb49aed63690216cc2728dc58f552378c292ab5844f3",
-);
-pub(crate) const WIDE_ORDER_MINUS_ONE: U896 = WIDE_ORDER.wrapping_sub(&U896::ONE);
-
-/// The modulus of the scalar field as a sequence of 14 32-bit limbs
-pub const MODULUS_LIMBS: [u32; 14] = [
-    0xab5844f3, 0x2378c292, 0x8dc58f55, 0x216cc272, 0xaed63690, 0xc44edb49, 0x7cca23e9, 0xffffffff,
-    0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff, 0x3fffffff,
-];
-
-elliptic_curve::scalar_from_impls!(Ed448, Scalar);
-
-// TODO(tarcieri): RustCrypto/elliptic-curves#1229
-// scalar_from_impls!(Decaf448, Scalar);
+elliptic_curve::scalar_from_impls!(Decaf448, Scalar);
 
 impl Display for Scalar {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        let bytes = self.to_bytes_rfc_8032();
+        let bytes = self.to_bytes();
         for b in &bytes {
             write!(f, "{:02x}", b)?;
         }
@@ -287,7 +266,7 @@ impl PrimeField for Scalar {
         Self::from_canonical_bytes(&repr)
     }
     fn to_repr(&self) -> Self::Repr {
-        self.to_bytes_rfc_8032()
+        self.to_bytes().into()
     }
     fn is_odd(&self) -> Choice {
         Choice::from((self.0.to_words()[0] & 1) as u8)
@@ -322,7 +301,7 @@ impl From<Scalar> for Vec<u8> {
 #[cfg(feature = "alloc")]
 impl From<&Scalar> for Vec<u8> {
     fn from(scalar: &Scalar) -> Vec<u8> {
-        scalar.to_bytes_rfc_8032().to_vec()
+        scalar.to_bytes().to_vec()
     }
 }
 
@@ -334,7 +313,7 @@ impl From<Scalar> for ScalarBytes {
 
 impl From<&Scalar> for ScalarBytes {
     fn from(scalar: &Scalar) -> ScalarBytes {
-        scalar.to_bytes_rfc_8032()
+        scalar.to_bytes().into()
     }
 }
 
@@ -360,7 +339,7 @@ impl TryFrom<&[u8]> for Scalar {
     type Error = &'static str;
 
     fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
-        if bytes.len() != 57 {
+        if bytes.len() != 56 {
             return Err("invalid byte length");
         }
         let scalar_bytes = ScalarBytes::try_from(bytes).expect("invalid scalar bytes");
@@ -406,7 +385,7 @@ impl elliptic_curve::zeroize::DefaultIsZeroes for Scalar {}
 
 impl core::fmt::LowerHex for Scalar {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
-        let tmp = self.to_bytes_rfc_8032();
+        let tmp = self.to_bytes();
         for &b in tmp.iter() {
             write!(f, "{:02x}", b)?;
         }
@@ -416,7 +395,7 @@ impl core::fmt::LowerHex for Scalar {
 
 impl core::fmt::UpperHex for Scalar {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
-        let tmp = self.to_bytes_rfc_8032();
+        let tmp = self.to_bytes();
         for &b in tmp.iter() {
             write!(f, "{:02X}", b)?;
         }
@@ -592,7 +571,7 @@ impl ShrAssign<usize> for Scalar {
 }
 
 #[cfg(feature = "bits")]
-impl From<&Scalar> for Ed448ScalarBits {
+impl From<&Scalar> for Decaf448ScalarBits {
     fn from(scalar: &Scalar) -> Self {
         scalar.0.to_words().into()
     }
@@ -636,47 +615,6 @@ impl Scalar {
     /// Is this scalar equal to zero?
     pub fn is_zero(&self) -> Choice {
         self.0.is_zero()
-    }
-
-    /// Divides a scalar by four without reducing mod p
-    /// This is used in the 2-isogeny when mapping points from Ed448-Goldilocks
-    /// to Twisted-Goldilocks
-    pub(crate) fn div_by_four(&mut self) {
-        self.0 >>= 2;
-    }
-
-    // This method was modified from Curve25519-Dalek codebase. [scalar.rs]
-    // We start with 14 u32s and convert them to 56 u8s.
-    // We then use the code copied from Dalek to convert the 56 u8s to radix-16 and re-center the coefficients to be between [-16,16)
-    // XXX: We can recode the scalar without converting it to bytes, will refactor this method to use this and check which is faster.
-    pub(crate) fn to_radix_16(self) -> [i8; 113] {
-        let bytes = self.to_bytes();
-        let mut output = [0i8; 113];
-
-        // Step 1: change radix.
-        // Convert from radix 256 (bytes) to radix 16 (nibbles)
-        #[inline(always)]
-        fn bot_half(x: u8) -> u8 {
-            x & 15
-        }
-        #[inline(always)]
-        fn top_half(x: u8) -> u8 {
-            (x >> 4) & 15
-        }
-
-        // radix-16
-        for i in 0..56 {
-            output[2 * i] = bot_half(bytes[i]) as i8;
-            output[2 * i + 1] = top_half(bytes[i]) as i8;
-        }
-        // re-center co-efficients to be between [-8, 8)
-        for i in 0..112 {
-            let carry = (output[i] + 8) >> 4;
-            output[i] -= carry << 4;
-            output[i + 1] += carry;
-        }
-
-        output
     }
 
     // XXX: Better if this method returns an array of 448 items
@@ -778,7 +716,7 @@ impl Scalar {
     /// - `None` if `bytes` is not a canonical byte representation.
     pub fn from_canonical_bytes(bytes: &ScalarBytes) -> CtOption<Self> {
         // Check that the 10 high bits are not set
-        let is_valid = is_zero(bytes[56]) | is_zero(bytes[55] >> 6);
+        let is_valid = is_zero(bytes[55] >> 6);
         let bytes: [u8; 56] = core::array::from_fn(|i| bytes[i]);
         let candidate = Scalar::from_bytes(&bytes);
 
@@ -786,14 +724,6 @@ impl Scalar {
         let (_, underflow) = candidate.0.borrowing_sub(&ORDER, Limb::ZERO);
         let underflow = Choice::from((underflow.0 >> (Limb::BITS - 1)) as u8);
         CtOption::new(candidate, underflow & is_valid)
-    }
-
-    /// Serialize the scalar into 57 bytes, per RFC 8032.
-    /// Byte 56 will always be zero.
-    pub fn to_bytes_rfc_8032(&self) -> ScalarBytes {
-        let mut bytes = ScalarBytes::default();
-        bytes[..56].copy_from_slice(&self.to_bytes());
-        bytes
     }
 
     /// Construct a `Scalar` by reducing a 912-bit little-endian integer
@@ -978,7 +908,7 @@ mod test {
     fn test_from_canonical_bytes() {
         // ff..ff should fail
         let mut bytes = ScalarBytes::from(hex!(
-            "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+            "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
         ));
         bytes.reverse();
         let s = Scalar::from_canonical_bytes(&bytes);
@@ -986,7 +916,7 @@ mod test {
 
         // n should fail
         let mut bytes = ScalarBytes::from(hex!(
-            "003fffffffffffffffffffffffffffffffffffffffffffffffffffffff7cca23e9c44edb49aed63690216cc2728dc58f552378c292ab5844f3"
+            "3fffffffffffffffffffffffffffffffffffffffffffffffffffffff7cca23e9c44edb49aed63690216cc2728dc58f552378c292ab5844f3"
         ));
         bytes.reverse();
         let s = Scalar::from_canonical_bytes(&bytes);
@@ -994,7 +924,7 @@ mod test {
 
         // n-1 should work
         let mut bytes = ScalarBytes::from(hex!(
-            "003fffffffffffffffffffffffffffffffffffffffffffffffffffffff7cca23e9c44edb49aed63690216cc2728dc58f552378c292ab5844f2"
+            "3fffffffffffffffffffffffffffffffffffffffffffffffffffffff7cca23e9c44edb49aed63690216cc2728dc58f552378c292ab5844f2"
         ));
         bytes.reverse();
         let s = Scalar::from_canonical_bytes(&bytes);
@@ -1036,23 +966,11 @@ mod test {
         ));
         let s = Scalar::from_bytes_mod_order_wide(&bytes);
         let mut bytes = ScalarBytes::from(hex!(
-            "002939f823b7292052bcb7e4d070af1a9cc14ba3c47c44ae17cf72c985bb24b6c520e319fb37a63e29800f160787ad1d2e11883fa931e7de81"
+            "2939f823b7292052bcb7e4d070af1a9cc14ba3c47c44ae17cf72c985bb24b6c520e319fb37a63e29800f160787ad1d2e11883fa931e7de81"
         ));
         bytes.reverse();
         let reduced = Scalar::from_canonical_bytes(&bytes).unwrap();
         assert_eq!(s, reduced);
-    }
-
-    #[test]
-    fn test_to_bytes_rfc8032() {
-        // n-1
-        let mut bytes: [u8; 57] = hex!(
-            "003fffffffffffffffffffffffffffffffffffffffffffffffffffffff7cca23e9c44edb49aed63690216cc2728dc58f552378c292ab5844f2"
-        );
-        bytes.reverse();
-        let x = Scalar::ZERO - Scalar::ONE;
-        let candidate = x.to_bytes_rfc_8032();
-        assert_eq!(&bytes[..], &candidate[..]);
     }
 
     #[cfg(all(feature = "alloc", feature = "serde"))]
@@ -1082,9 +1000,9 @@ mod test {
         let dst = b"edwards448_XOF:SHAKE256_ELL2_RO_";
         let res =
             Scalar::hash::<elliptic_curve::hash2curve::ExpandMsgXof<sha3::Shake256>>(msg, dst);
-        let expected: [u8; 57] = hex_literal::hex!(
-            "2d32a08f09b88275cc5f437e625696b18de718ed94559e17e4d64aafd143a8527705132178b5ce7395ea6214735387398a35913656b4951300"
+        let expected: [u8; 56] = hex_literal::hex!(
+            "2d32a08f09b88275cc5f437e625696b18de718ed94559e17e4d64aafd143a8527705132178b5ce7395ea6214735387398a35913656b49513"
         );
-        assert_eq!(res.to_bytes_rfc_8032(), Array::from(expected));
+        assert_eq!(res.to_bytes(), expected);
     }
 }

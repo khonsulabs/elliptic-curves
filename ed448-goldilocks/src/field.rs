@@ -2,6 +2,7 @@ mod element;
 mod scalar;
 
 pub(crate) use element::*;
+pub(crate) use scalar::{HALF_ORDER, NZ_ORDER, ORDER_MINUS_ONE, WIDE_ORDER_MINUS_ONE};
 pub use scalar::{MODULUS_LIMBS, ORDER, Scalar, ScalarBytes, WIDE_ORDER, WideScalarBytes};
 
 use crate::curve::edwards::EdwardsPoint;

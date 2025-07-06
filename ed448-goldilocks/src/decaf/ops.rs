@@ -1,4 +1,4 @@
-use crate::{DecafAffinePoint, Scalar, curve::scalar_mul::double_and_add};
+use crate::{DecafAffinePoint, curve::scalar_mul::double_and_add};
 use core::{
     borrow::Borrow,
     iter::Sum,
@@ -7,6 +7,7 @@ use core::{
 use elliptic_curve::CurveGroup;
 
 use super::DecafPoint;
+use super::Scalar;
 
 /// Scalar Mul Operations
 impl Mul<&Scalar> for &DecafPoint {
@@ -14,7 +15,7 @@ impl Mul<&Scalar> for &DecafPoint {
 
     fn mul(self, scalar: &Scalar) -> DecafPoint {
         // XXX: We can do better than double and add
-        DecafPoint(double_and_add(&self.0, scalar))
+        DecafPoint(double_and_add(&self.0, scalar.bits()))
     }
 }
 

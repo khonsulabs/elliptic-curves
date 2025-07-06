@@ -53,7 +53,9 @@ pub(crate) use field::{GOLDILOCKS_BASE_POINT, TWISTED_EDWARDS_BASE_POINT};
 pub use curve::{
     AffinePoint, CompressedEdwardsY, EdwardsPoint, MontgomeryPoint, ProjectiveMontgomeryPoint,
 };
-pub use decaf::{AffinePoint as DecafAffinePoint, CompressedDecaf, DecafPoint};
+pub use decaf::{
+    AffinePoint as DecafAffinePoint, CompressedDecaf, DecafPoint, Scalar as DecafScalar,
+};
 pub use field::{MODULUS_LIMBS, ORDER, Scalar, ScalarBytes, WIDE_ORDER, WideScalarBytes};
 pub use ristretto::{CompressedRistretto, RistrettoPoint};
 #[cfg(feature = "signing")]
@@ -61,7 +63,7 @@ pub use sign::*;
 
 use elliptic_curve::{
     Curve, FieldBytesEncoding, PrimeCurve,
-    array::typenum::U57,
+    array::typenum::{U56, U57},
     bigint::{ArrayEncoding, U448},
     point::PointCompression,
 };
@@ -126,7 +128,7 @@ pub type Decaf448ScalarBits = elliptic_curve::scalar::ScalarBits<Decaf448>;
 pub type Decaf448NonZeroScalar = elliptic_curve::NonZeroScalar<Decaf448>;
 
 impl Curve for Decaf448 {
-    type FieldBytesSize = U57;
+    type FieldBytesSize = U56;
     type Uint = U448;
 
     const ORDER: U448 = ORDER;
@@ -150,9 +152,8 @@ impl FieldBytesEncoding<Decaf448> for U448 {
     }
 }
 
-// TODO(tarcieri): RustCrypto/elliptic-curves#1229
-// // impl elliptic_curve::CurveArithmetic for Decaf448 {
-//     type AffinePoint = DecafAffinePoint;
-//     type ProjectivePoint = DecafPoint;
-//     type Scalar = Scalar;
-// }
+impl elliptic_curve::CurveArithmetic for Decaf448 {
+    type AffinePoint = DecafAffinePoint;
+    type ProjectivePoint = DecafPoint;
+    type Scalar = DecafScalar;
+}
